@@ -25,6 +25,9 @@ function App() {
   const [isWin, setIsWin]           = useState(false);
   const [connected, setConnected]   = useState(true);
 
+  // --- STATE ΓΙΑ ΤΟ AUTO SPIN ---
+  const [autoSpin, setAutoSpin]     = useState(false);
+
   useEffect(() => {
     fetch(`${API}/status`)
       .then(res => res.json())
@@ -35,16 +38,33 @@ function App() {
       });
   }, []);
 
+  // --- EFFECT ΓΙΑ ΤΟ AUTO SPIN ΛΟΥΠ ---
+  useEffect(() => {
+    let timer;
+    if (autoSpin && !isSpinning && connected && balance > 0) {
+      // Αν κέρδισε στο προηγούμενο, περίμενε 1.5 δευτερόλεπτο, αλλιώς 0.5
+      const delay = isWin ? 1500 : 500;
+      timer = setTimeout(() => {
+        spin();
+      }, delay);
+    } else if (balance <= 0 && autoSpin) {
+      setAutoSpin(false); // Κλείνει το auto spin αν τελειώσουν τα λεφτά
+    }
+    return () => clearTimeout(timer);
+  }, [autoSpin, isSpinning, isWin, balance, connected]);
+
   const spin = async () => {
     if (isSpinning || !connected) return;
 
     const betValue = parseInt(bet, 10);
     if (isNaN(betValue) || betValue <= 0) {
       setMessage('⚠️ Βάλε ένα θετικό ποντάρισμα.');
+      setAutoSpin(false);
       return;
     }
     if (betValue > balance) {
       setMessage('⚠️ Δεν έχεις αρκετό υπόλοιπο!');
+      setAutoSpin(false);
       return;
     }
 
@@ -63,14 +83,15 @@ function App() {
         // Σταματάμε τους τροχούς αν υπάρξει σφάλμα
         setIsSpinning(false);
         setReelSpinStatuses([false, false, false]);
+        setAutoSpin(false);
         return;
       }
 
       const finalReels = data.reels;
       
-      // --- ΝΕΕΣ ΤΑΧΥΤΗΤΕΣ ΓΙΑ ΠΙΟ ΓΡΗΓΟΡΟ ANIMATION ---
-      const baseDelay = 400; // Ο πρώτος τροχός σταματάει στα 400ms (αντί για 1000ms)
-      const staggerDelay = 250; // Κάθε επόμενος τροχός σταματάει μετά από 250ms (αντί για 700ms)
+      // --- ΤΑΧΥΤΗΤΕΣ ΓΙΑ ΤΟ ANIMATION (ΑΜΕΤΑΒΛΗΤΕΣ) ---
+      const baseDelay = 400; // Ο πρώτος τροχός σταματάει στα 400ms
+      const staggerDelay = 250; // Κάθε επόμενος τροχός σταματάει μετά από 250ms
 
       [0, 1, 2].forEach(index => {
           setTimeout(() => {
@@ -98,6 +119,7 @@ function App() {
                       setMessage(`🎉 ΚΕΡΔΙΣΕΣ ${data.win_amount} €!`);
                   } else if (data.new_balance <= 0) {
                       setMessage('Δεν έχεις άλλα χρήματα! Πάτα Reset.');
+                      setAutoSpin(false);
                   } else {
                       setMessage('Δοκίμασε ξανά!');
                   }
@@ -110,6 +132,7 @@ function App() {
       // Σταματάμε τους τροχούς αν υπάρξει σφάλμα
       setIsSpinning(false);
       setReelSpinStatuses([false, false, false]);
+      setAutoSpin(false);
     }
   };
 
@@ -121,6 +144,7 @@ function App() {
       setReels(['🍒', '🍒', '🍒']);
       setMessage('Καλή τύχη!');
       setIsWin(false);
+      setAutoSpin(false);
       setConnected(true);
       // Επαναφορά της κατάστασης περιστροφής
       setReelSpinStatuses([false, false, false]);
@@ -152,7 +176,7 @@ function App() {
           <div key={i} style={styles.reelWrapper}>
             <div style={{
               ...styles.reelContent,
-              // ΝΕΟ: Η ταχύτητα του blur / animation έγινε 0.06s για πιο θολή και γρήγορη κίνηση
+              // Η ταχύτητα του blur / animation
               animation: reelSpinStatuses[i] ? 'roll 0.06s linear infinite' : 'none',
               filter: reelSpinStatuses[i] ? 'blur(2px)' : 'none',
             }}>
@@ -178,14 +202,29 @@ function App() {
           min="1"
           max={balance}
           step="5"
-          disabled={isSpinning}
+          disabled={isSpinning || autoSpin}
         />
         <button
           onClick={spin}
-          disabled={isSpinning || !connected || balance <= 0}
-          style={isSpinning ? styles.buttonDisabled : styles.button}
+          disabled={isSpinning || autoSpin || !connected || balance <= 0}
+          style={isSpinning || autoSpin ? styles.buttonDisabled : styles.button}
         >
           {isSpinning ? '⏳' : 'SPIN'}
+        </button>
+
+        {/* ΚΟΥΜΠΙ AUTO SPIN */}
+        <button
+          onClick={() => setAutoSpin(!autoSpin)}
+          disabled={!connected || (balance <= 0 && !autoSpin)}
+          style={{
+            ...styles.button,
+            backgroundColor: autoSpin ? '#2f3542' : '#ffa500',
+            marginLeft: '10px',
+            minWidth: '160px',
+            fontSize: '1rem'
+          }}
+        >
+          {autoSpin ? '🛑 STOP AUTO' : '🔄 AUTO SPIN'}
         </button>
       </div>
 
@@ -262,11 +301,13 @@ const styles = {
     padding: '10px 36px', fontSize: '1.3rem', fontWeight: 'bold',
     backgroundColor: '#ff4757', color: 'white', border: 'none',
     borderRadius: '5px', cursor: 'pointer',
+    minWidth: '140px', textAlign: 'center' // Διορθώνει το μέγεθος του κουμπιού
   },
   buttonDisabled: {
     padding: '10px 36px', fontSize: '1.3rem',
     backgroundColor: '#555', color: '#888',
     borderRadius: '5px', cursor: 'not-allowed', border: 'none',
+    minWidth: '140px', textAlign: 'center' // Διορθώνει το μέγεθος του κουμπιού
   },
   resetButton: {
     marginTop: '12px', background: 'transparent', border: '1px solid #555',
