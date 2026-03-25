@@ -10,12 +10,18 @@ const SYMBOLS_INFO = {
   "🍒": { payout: 2,  label: "πολύ συχνό" },
 };
 
+// Λίστα συμβόλων για το animation
+const ALL_SYMBOLS = Object.keys(SYMBOLS_INFO);
+
 function App() {
   const [reels, setReels]           = useState(['🍒', '🍒', '🍒']);
   const [balance, setBalance]       = useState(0);
   const [bet, setBet]               = useState(10);
   const [message, setMessage]       = useState('Καλή τύχη!');
-  const [isSpinning, setIsSpinning] = useState(false);
+  // Κρατάμε το isSpinning για να απενεργοποιούμε το κουμπί SPIN
+  const [isSpinning, setIsSpinning] = useState(false); 
+  // Πίνακας που δείχνει αν περιστρέφεται κάθε τροχός ξεχωριστά
+  const [reelSpinStatuses, setReelSpinStatuses] = useState([false, false, false]);
   const [isWin, setIsWin]           = useState(false);
   const [connected, setConnected]   = useState(true);
 
@@ -45,6 +51,8 @@ function App() {
     setIsSpinning(true);
     setIsWin(false);
     setMessage('Περιστροφή...');
+    // Ξεκινάνε όλοι οι τροχοί να περιστρέφονται
+    setReelSpinStatuses([true, true, true]);
 
     try {
       const response = await fetch(`${API}/spin?bet=${betValue}`, { method: 'POST' });
@@ -52,28 +60,56 @@ function App() {
 
       if (!response.ok) {
         setMessage(`⚠️ ${data.detail}`);
+        // Σταματάμε τους τροχούς αν υπάρξει σφάλμα
         setIsSpinning(false);
+        setReelSpinStatuses([false, false, false]);
         return;
       }
 
-      setTimeout(() => {
-        setReels(data.reels);
-        setBalance(data.new_balance);
-        setIsSpinning(false);
-        setIsWin(data.is_win);
+      const finalReels = data.reels;
+      
+      // --- ΝΕΕΣ ΤΑΧΥΤΗΤΕΣ ΓΙΑ ΠΙΟ ΓΡΗΓΟΡΟ ANIMATION ---
+      const baseDelay = 400; // Ο πρώτος τροχός σταματάει στα 400ms (αντί για 1000ms)
+      const staggerDelay = 250; // Κάθε επόμενος τροχός σταματάει μετά από 250ms (αντί για 700ms)
 
-        if (data.is_win) {
-          setMessage(`🎉 ΚΕΡΔΙΣΕΣ ${data.win_amount} €!`);
-        } else if (data.new_balance <= 0) {
-          setMessage('Δεν έχεις άλλα χρήματα! Πάτα Reset.');
-        } else {
-          setMessage('Δοκίμασε ξανά!');
-        }
-      }, 600);
+      [0, 1, 2].forEach(index => {
+          setTimeout(() => {
+              // 1. Ενημερώνουμε το σύμβολο του συγκεκριμένου τροχού
+              setReels(prevReels => {
+                  const newReels = [...prevReels];
+                  newReels[index] = finalReels[index];
+                  return newReels;
+              });
+
+              // 2. Σταματάμε το animation του συγκεκριμένου τροχού
+              setReelSpinStatuses(prevStatuses => {
+                  const newStatuses = [...prevStatuses];
+                  newStatuses[index] = false;
+                  return newStatuses;
+              });
+
+              // 3. Στον τελευταίο τροχό, ολοκληρώνουμε τη διαδικασία
+              if (index === 2) {
+                  setBalance(data.new_balance);
+                  setIsSpinning(false); // Ενεργοποιούμε ξανά το κουμπί
+                  setIsWin(data.is_win);
+
+                  if (data.is_win) {
+                      setMessage(`🎉 ΚΕΡΔΙΣΕΣ ${data.win_amount} €!`);
+                  } else if (data.new_balance <= 0) {
+                      setMessage('Δεν έχεις άλλα χρήματα! Πάτα Reset.');
+                  } else {
+                      setMessage('Δοκίμασε ξανά!');
+                  }
+              }
+          }, baseDelay + (index * staggerDelay)); // Σταματούν στα 400ms, 650ms και 900ms
+      });
 
     } catch (err) {
       setMessage('❌ Δεν βρέθηκε το backend!');
+      // Σταματάμε τους τροχούς αν υπάρξει σφάλμα
       setIsSpinning(false);
+      setReelSpinStatuses([false, false, false]);
     }
   };
 
@@ -86,6 +122,8 @@ function App() {
       setMessage('Καλή τύχη!');
       setIsWin(false);
       setConnected(true);
+      // Επαναφορά της κατάστασης περιστροφής
+      setReelSpinStatuses([false, false, false]);
     } catch {
       setMessage('❌ Αποτυχία σύνδεσης.');
     }
@@ -111,12 +149,21 @@ function App() {
         transition: 'border-color 0.3s'
       }}>
         {reels.map((sym, i) => (
-          <div key={i} style={{
-            ...styles.reel,
-            animation: isSpinning ? 'spin 0.1s infinite alternate' : 'none',
-            animationDelay: `${i * 0.05}s`,
-          }}>
-            {sym}
+          <div key={i} style={styles.reelWrapper}>
+            <div style={{
+              ...styles.reelContent,
+              // ΝΕΟ: Η ταχύτητα του blur / animation έγινε 0.06s για πιο θολή και γρήγορη κίνηση
+              animation: reelSpinStatuses[i] ? 'roll 0.06s linear infinite' : 'none',
+              filter: reelSpinStatuses[i] ? 'blur(2px)' : 'none',
+            }}>
+              <div style={styles.symbolItem}>{sym}</div>
+              {reelSpinStatuses[i] && (
+                <>
+                  <div style={styles.symbolItem}>{ALL_SYMBOLS[(i + 1) % ALL_SYMBOLS.length]}</div>
+                  <div style={styles.symbolItem}>{ALL_SYMBOLS[(i + 2) % ALL_SYMBOLS.length]}</div>
+                </>
+              )}
+            </div>
           </div>
         ))}
       </div>
@@ -142,7 +189,7 @@ function App() {
         </button>
       </div>
 
-      <h2 style={{ color: isWin ? '#4caf50' : '#fff', textAlign: 'center' }}>
+      <h2 style={{ color: isWin ? '#4caf50' : '#fff', textAlign: 'center', minHeight: '35px' }}>
         {message}
       </h2>
 
@@ -162,9 +209,9 @@ function App() {
       </div>
 
       <style>{`
-        @keyframes spin {
-          from { transform: translateY(-3px); }
-          to   { transform: translateY(3px); }
+        @keyframes roll {
+          0% { transform: translateY(0); }
+          100% { transform: translateY(-110px); }
         }
       `}</style>
     </div>
@@ -191,10 +238,19 @@ const styles = {
     display: 'flex', background: '#111', padding: '20px',
     borderRadius: '15px', gap: '10px',
   },
-  reel: {
-    fontSize: '70px', width: '110px', height: '110px',
-    display: 'flex', alignItems: 'center', justifyContent: 'center',
+  reelWrapper: {
+    width: '110px', height: '110px',
     backgroundColor: '#fff', borderRadius: '10px',
+    overflow: 'hidden', position: 'relative'
+  },
+  reelContent: {
+    display: 'flex', flexDirection: 'column',
+    width: '100%',
+  },
+  symbolItem: {
+    fontSize: '70px', minHeight: '110px',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    color: '#000'
   },
   controls: { marginTop: '24px', display: 'flex', gap: '10px', alignItems: 'center' },
   input: {
