@@ -17,11 +17,11 @@ class SlotMachine:
     """
     # Τα σύμβολα μπορούν να είναι χαρακτηριστικό (attribute) της κλάσης
     SYMBOLS = {
-        "💎": {"weight": 5,  "payout": 50},
-        "⭐": {"weight": 15, "payout": 20},
-        "🔔": {"weight": 25, "payout": 10},
-        "🍋": {"weight": 35, "payout": 5},
-        "🍒": {"weight": 50, "payout": 2},
+        "💎": {"weight": 10,  "payout": 50},
+        "⭐": {"weight": 30, "payout": 20},
+        "🔔": {"weight": 50, "payout": 10},
+        "🍋": {"weight": 100, "payout": 5},
+        "🍒": {"weight": 200, "payout": 2},
     }
 
     def __init__(self, initial_balance: int = 1000):
