@@ -6,92 +6,119 @@ app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:5173"],
+    allow_origins=["*"],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 class SlotMachine:
-    """
-    Κλάση που αναπαριστά τη λογική και την κατάσταση του "φρουτακίου".
-    """
-    # Τα σύμβολα μπορούν να είναι χαρακτηριστικό (attribute) της κλάσης
+    # Σύμβολα και Πιθανότητες (Weights) / Πολλαπλασιαστές (Payouts)
     SYMBOLS = {
-        "💎": {"weight": 10,  "payout": 50},
-        "⭐": {"weight": 30, "payout": 20},
-        "🔔": {"weight": 50, "payout": 10},
-        "🍋": {"weight": 100, "payout": 5},
-        "🍒": {"weight": 200, "payout": 2},
+        "💎": {"weight": 5,   "payout": 1000},
+        "⭐": {"weight": 12,  "payout": 500},
+        "🔔": {"weight": 25,  "payout": 200},
+        "🍋": {"weight": 45,  "payout": 100},
+        "🍒": {"weight": 70,  "payout": 50},
+        "🍇": {"weight": 90,  "payout": 20},
     }
 
-    def __init__(self, initial_balance: int = 1000):
-        # Αρχικοποίηση της κατάστασης του παιχνιδιού για τον παίκτη
-        self.initial_balance = initial_balance
-        self.balance = initial_balance
-        self.last_win = 0
+    # Ορισμός 20 γραμμών πληρωμής (Paylines) σε πλέγμα 5x3
+    # Κάθε λίστα περιέχει τα index (row) για κάθε στήλη [col0, col1, col2, col3, col4]
+    PAYLINES = [
+        [1, 1, 1, 1, 1], # 1: Μεσαία οριζόντια
+        [0, 0, 0, 0, 0], # 2: Πάνω οριζόντια
+        [2, 2, 2, 2, 2], # 3: Κάτω οριζόντια
+        [0, 1, 2, 1, 0], # 4: V σχήμα
+        [2, 1, 0, 1, 2], # 5: Ανάποδο V
+        [0, 0, 1, 2, 2], # 6: Σκάλα κάτω
+        [2, 2, 1, 0, 0], # 7: Σκάλα πάνω
+        [1, 0, 0, 0, 1], # 8: Καμπύλη πάνω
+        [1, 2, 2, 2, 1], # 9: Καμπύλη κάτω
+        [0, 1, 0, 1, 0], # 10: Ζικ-ζακ πάνω
+        [2, 1, 2, 1, 2], # 11: Ζικ-ζακ κάτω
+        [1, 0, 1, 2, 1], # 12: Ρόμβος
+        [0, 2, 0, 2, 0], # 13: Μεγάλο ζικ-ζακ
+        [2, 0, 2, 0, 2], # 14: Μεγάλο ζικ-ζακ ανάποδα
+        [1, 1, 0, 1, 1], # 15: Μικρή καμπούρα πάνω
+        [1, 1, 2, 1, 1], # 16: Μικρή καμπούρα κάτω
+        [0, 1, 1, 1, 0], # 17: Πλάγια τόξα πάνω
+        [2, 1, 1, 1, 2], # 18: Πλάγια τόξα κάτω
+        [0, 2, 2, 2, 0], # 19: Βαθύ U
+        [2, 0, 0, 0, 2], # 20: Ανάποδο βαθύ U
+    ]
 
-    def get_status(self) -> dict:
-        """Επιστρέφει την τρέχουσα κατάσταση του παίκτη."""
-        return {
-            "balance": self.balance,
-            "last_win": self.last_win
-        }
+    def __init__(self):
+        self.balance = 1000
 
-    def spin(self, bet: int) -> dict:
-        """Εκτελεί μια περιστροφή και υπολογίζει τα κέρδη/απώλειες."""
-        if bet <= 0:
-            raise HTTPException(status_code=400, detail="Το ποντάρισμα πρέπει να είναι θετικό")
-        if bet > self.balance:
-            raise HTTPException(status_code=400, detail="Δεν έχεις αρκετό υπόλοιπο")
+    def spin(self, bet_per_line: int):
+        total_bet = bet_per_line * len(self.PAYLINES)
+        if total_bet > self.balance:
+            raise HTTPException(status_code=400, detail="Insufficient balance")
+        
+        self.balance -= total_bet
 
-        # Αφαίρεση πονταρίσματος
-        self.balance -= bet
-
+        # Δημιουργία πλέγματος 5 στηλών x 3 γραμμών
+        # Το grid αποθηκεύεται ως list of lists: grid[στήλη][γραμμή]
         symbol_list = list(self.SYMBOLS.keys())
         weights = [s["weight"] for s in self.SYMBOLS.values()]
-        reels = random.choices(symbol_list, weights=weights, k=3)
+        
+        grid = []
+        for _ in range(5):
+            column = random.choices(symbol_list, weights=weights, k=3)
+            grid.append(column)
 
-        win_amount = 0
-        is_win = False
+        total_win = 0
+        wins = []
 
-        # Έλεγχος για νίκη (3 ίδια σύμβολα)
-        if reels[0] == reels[1] == reels[2]:
-            is_win = True
-            multiplier = self.SYMBOLS[reels[0]]["payout"]
-            win_amount = bet * multiplier
-            self.balance += win_amount
+        # Έλεγχος των 20 γραμμών πληρωμής
+        for line_id, payline in enumerate(self.PAYLINES):
+            # Παίρνουμε τα σύμβολα που βρίσκονται στη διαδρομή της γραμμής
+            line_symbols = [grid[col_idx][row_idx] for col_idx, row_idx in enumerate(payline)]
+            
+            # Υπολογισμός συνεχόμενων ίδιων συμβόλων από αριστερά
+            match_count = 1
+            first_symbol = line_symbols[0]
+            for i in range(1, len(line_symbols)):
+                if line_symbols[i] == first_symbol:
+                    match_count += 1
+                else:
+                    break
+            
+            # Πληρωμή αν υπάρχουν 3 ή περισσότερα ίδια σύμβολα
+            if match_count >= 3:
+                multiplier = self.SYMBOLS[first_symbol]["payout"]
+                # Bonus για 4 ή 5 σύμβολα στη σειρά
+                bonus = 1 if match_count == 3 else (2 if match_count == 4 else 5)
+                line_payout = bet_per_line * multiplier * bonus
+                total_win += line_payout
+                wins.append({
+                    "line": line_id + 1,
+                    "symbol": first_symbol,
+                    "count": match_count,
+                    "payout": line_payout
+                })
 
-        self.last_win = win_amount
-
+        self.balance += total_win
         return {
-            "reels": reels,
-            "is_win": is_win,
-            "win_amount": win_amount,
-            "new_balance": self.balance
+            "grid": grid,
+            "total_win": total_win,
+            "winning_lines": wins,
+            "balance": self.balance,
+            "total_bet": total_bet
         }
 
-    def reset(self) -> dict:
-        """Επαναφέρει το παιχνίδι στην αρχική του κατάσταση."""
-        self.balance = self.initial_balance
-        self.last_win = 0
-        return {"message": "Το υπόλοιπο ανανεώθηκε!", "balance": self.balance}
-
-
-# ---------------------------------------------------------
-# API Endpoints (Δρομολόγηση - Routing)
-# ---------------------------------------------------------
-
-# Δημιουργούμε το "αντικείμενο" του παιχνιδιού
 game = SlotMachine()
 
 @app.get("/status")
 def get_status():
-    return game.get_status()
+    return {"balance": game.balance}
 
 @app.post("/spin")
-def spin(bet: int):
-    return game.spin(bet)
+def spin(bet_per_line: int = 1):
+    return game.spin(bet_per_line)
 
 @app.post("/reset")
-def reset_game():
-    return game.reset()
+def reset():
+    game.balance = 1000
+    return {"balance": game.balance}
